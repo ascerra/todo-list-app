@@ -22,7 +22,7 @@ spec:
           - name: url
             value: https://github.com/flacatus/tekton-integration-catalog.git
           - name: revision
-            value: main
+            value: k_comp
           - name: pathInRepo
             value: common/tasks/test-metadata/0.1/test-metadata.yaml
       params:
