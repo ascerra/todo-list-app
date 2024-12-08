@@ -5,7 +5,7 @@ metadata:
 spec:
   description: |
     This task clones a repository, builds a container image with Sealights binaries, 
-    and pushes the image to a container registry.
+    and pushes the image to a container registry. update
   results:
     - name: output-image
       description: The resulting container image containing Sealights binaries.
