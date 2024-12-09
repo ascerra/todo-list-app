@@ -6,36 +6,36 @@ spec:
   description: |
     This task clones a repository, builds a container image with Sealights binaries, 
     and pushes the image to a container registry.
-  results:
-    - name: output-image
-      description: The resulting container image containing Sealights binaries.
-  params:
-    - description: Snapshot of the application
-      name: SNAPSHOT
-      default: '{"components": [{"name":"test-app", "containerImage": "quay.io/example/repo:latest"}]}'
-      type: string
-    - name: oci-container-repo
-      default: 'quay.io/ascerra/sealights-python-app'
-      description: The ORAS container used to store all test artifacts.
+  # results:
+  #   - name: output-image
+  #     description: The resulting container image containing Sealights binaries.
+  # params:
+  #   - description: Snapshot of the application
+  #     name: SNAPSHOT
+  #     default: '{"components": [{"name":"test-app", "containerImage": "quay.io/example/repo:latest"}]}'
+  #     type: string
+  #   - name: oci-container-repo
+  #     default: 'quay.io/ascerra/sealights-python-app'
+  #     description: The ORAS container used to store all test artifacts.
   tasks:
-    - name: test-metadata
-      taskRef:
-        resolver: git
-        params:
-          - name: url
-            value: https://github.com/konflux-ci/tekton-integration-catalog.git
-          - name: revision
-            value: main
-          - name: pathInRepo
-            value: common/tasks/test-metadata/0.1/test-metadata.yaml
-      params:
-        - name: SNAPSHOT
-          value: $(params.SNAPSHOT)
-        - name: test-name
-          value: $(context.pipelineRun.name)
+    # - name: test-metadata
+    #   taskRef:
+    #     resolver: git
+    #     params:
+    #       - name: url
+    #         value: https://github.com/konflux-ci/tekton-integration-catalog.git
+    #       - name: revision
+    #         value: main
+    #       - name: pathInRepo
+    #         value: common/tasks/test-metadata/0.1/test-metadata.yaml
+    #   params:
+    #     - name: SNAPSHOT
+    #       value: $(params.SNAPSHOT)
+    #     - name: test-name
+    #       value: $(context.pipelineRun.name)
     - name: pytests
-      runAfter:
-        - test-metadata
+      # runAfter:
+      #   - test-metadata
       taskRef:
         resolver: git
         params:
@@ -45,12 +45,12 @@ spec:
             value: sealights
           - name: pathInRepo
             value: tasks/sealights/pytests/0.1/sealights-run-pytests.yaml
-      params:
-        - name: git-url
-          value: $(tasks.test-metadata.results.source-repo-url)
-        - name: git-branch
-          value: $(tasks.test-metadata.results.source-repo-branch)
-        - name: git-revision
-          value: $(tasks.test-metadata.results.git-revision)
-        - name: IMAGE
-          value: $(tasks.test-metadata.results.container-image)
+      # params:
+      #   - name: git-url
+      #     value: $(tasks.test-metadata.results.source-repo-url)
+      #   - name: git-branch
+      #     value: $(tasks.test-metadata.results.source-repo-branch)
+      #   - name: git-revision
+      #     value: $(tasks.test-metadata.results.git-revision)
+      #   - name: IMAGE
+      #     value: $(tasks.test-metadata.results.container-image)
