@@ -1,0 +1,95 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: todo-app
+  labels:
+    app: todo-app
+  annotations:
+    tekton.dev/build-session-id: "${BUILD_SESSION_ID}"  # Placeholder replaced dynamically
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: todo-app
+  template:
+    metadata:
+      labels:
+        app: todo-app
+    spec:
+      securityContext:
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+      volumes:
+        - name: shared-bin
+          emptyDir: {}
+        - name: sealights-credentials
+          secret:
+            secretName: sealights-credentials
+      initContainers:
+        - name: install-sl-python
+          image: python:3.9-slim
+          command:
+            - "sh"
+            - "-c"
+            - >
+              pip install sealights-python-agent --target /shared-bin  &&
+              echo "shared bin" &&
+              ls /shared-bin/bin &&
+              echo "shared bin" &&
+              cp /shared-bin/bin/sl-python /shared-bin/sl-python &&
+              chmod +x /shared-bin/sl-python &&
+              ls /shared-bin/
+          volumeMounts:
+            - name: shared-bin
+              mountPath: /shared-bin
+          securityContext:
+            runAsUser: 1000
+            runAsGroup: 1000
+          resources:
+            requests:
+              memory: "64Mi"
+              cpu: "250m"
+            limits:
+              memory: "128Mi"
+              cpu: "500m"
+      containers:
+        - name: app-container
+          image: "${IMAGE}"    # Placeholder replaced dynamically
+          env:
+            - name: BUILD_SESSION_ID
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.annotations['tekton.dev/build-session-id']
+            - name: SL_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: sealights-credentials
+                  key: token
+            - name: PYTHON_EXE
+              value: "/shared-bin/sl-python run --tokenfile /sealights/token --buildsessionid ${BUILD_SESSION_ID} -- python"
+          command:
+            - sh
+            - "-c"
+            - >
+              export PYTHONPATH=/shared-bin &&
+              $PYTHON_EXE app.py
+          volumeMounts:
+            - name: shared-bin
+              mountPath: /shared-bin
+            - name: sealights-credentials
+              mountPath: /sealights
+              readOnly: true
+          ports:
+            - containerPort: 5000
+              protocol: TCP
+          securityContext:
+            runAsUser: 1000
+            runAsGroup: 1000
+          resources:
+            requests:
+              memory: "128Mi"
+              cpu: "500m"
+            limits:
+              memory: "256Mi"
+              cpu: "1"
