@@ -15,4 +15,4 @@ RUN pip install --no-cache-dir -r robot_requirements.txt
 EXPOSE 5000
 
 # Run the application
-CMD ["python", "_app.py"]
+CMD ["python", "app.py"]
