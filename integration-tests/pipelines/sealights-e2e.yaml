@@ -1,22 +1,19 @@
 apiVersion: tekton.dev/v1
 kind: Pipeline
 metadata:
-  name: test-sealights
+  name: sealights-instrumentation
 spec:
   description: |
-    This task clones a repository, builds a container image with Sealights binaries, 
-    and pushes the image to a container registry.
-  results:
-    - name: output-image
-      description: The resulting container image containing Sealights binaries.
+    An integration test that exercises Sealights capabilities with Python.
   params:
     - description: Snapshot of the application
       name: SNAPSHOT
       default: '{"components": [{"name":"test-app", "containerImage": "quay.io/example/repo:latest"}]}'
       type: string
-    - name: oci-container-repo
-      default: 'quay.io/ascerra/sealights-python-app'
-      description: The ORAS container used to store all test artifacts.
+    - description: Path to the deployment YAML file
+      name: deployment-file
+      default: deploy/deployment.yaml
+      type: string
   tasks:
     - name: test-metadata
       taskRef:
@@ -25,7 +22,7 @@ spec:
           - name: url
             value: https://github.com/flacatus/tekton-integration-catalog.git
           - name: revision
-            value: k_comp
+            value: sealights_build
           - name: pathInRepo
             value: common/tasks/test-metadata/0.1/test-metadata.yaml
       params:
@@ -33,26 +30,158 @@ spec:
           value: $(params.SNAPSHOT)
         - name: test-name
           value: $(context.pipelineRun.name)
-    - name: pytests
+    - name: sealights-get-refs
       runAfter:
         - test-metadata
       taskRef:
         resolver: git
         params:
           - name: url
-            value: https://github.com/ascerra/tekton-integration-catalog.git
+            value: https://github.com/flacatus/tekton-integration-catalog.git
           - name: revision
-            value: sealights
+            value: extract_ref
           - name: pathInRepo
-            value: tasks/sealights/pytests/0.1/sealights-run-pytests.yaml
+            value: tasks/sealights/sealights-get-refs/0.1/sealights-get-refs.yaml
       params:
+        - name: SNAPSHOT
+          value: $(params.SNAPSHOT)
+    - name: provision-eaas-space
+      runAfter:
+        - sealights-get-refs
+      taskRef:
+        resolver: git
+        params:
+          - name: url
+            value: https://github.com/konflux-ci/build-definitions.git
+          - name: revision
+            value: main
+          - name: pathInRepo
+            value: task/eaas-provision-space/0.1/eaas-provision-space.yaml
+      params:
+        - name: ownerName
+          value: $(context.pipelineRun.name)
+        - name: ownerUid
+          value: $(context.pipelineRun.uid)
+    - name: provision-cluster
+      runAfter:
+        - provision-eaas-space
+      taskSpec:
+        results:
+          - name: clusterName
+            value: "$(steps.create-cluster.results.clusterName)"
+        volumes:
+          - name: credentials
+            emptyDir: {}
+        steps:
+          - name: get-supported-versions
+            ref:
+              resolver: git
+              params:
+                - name: url
+                  value: https://github.com/konflux-ci/build-definitions.git
+                - name: revision
+                  value: main
+                - name: pathInRepo
+                  value: stepactions/eaas-get-supported-ephemeral-cluster-versions/0.1/eaas-get-supported-ephemeral-cluster-versions.yaml
+            params:
+              - name: eaasSpaceSecretRef
+                value: $(tasks.provision-eaas-space.results.secretRef)
+          - name: pick-version
+            ref:
+              resolver: git
+              params:
+                - name: url
+                  value: https://github.com/konflux-ci/build-definitions.git
+                - name: revision
+                  value: main
+                - name: pathInRepo
+                  value: stepactions/eaas-get-latest-openshift-version-by-prefix/0.1/eaas-get-latest-openshift-version-by-prefix.yaml
+            params:
+              - name: prefix
+                value: "$(steps.get-supported-versions.results.versions[0])."
+          - name: create-cluster
+            ref:
+              resolver: git
+              params:
+                - name: url
+                  value: https://github.com/konflux-ci/build-definitions.git
+                - name: revision
+                  value: main
+                - name: pathInRepo
+                  value: stepactions/eaas-create-ephemeral-cluster-hypershift-aws/0.1/eaas-create-ephemeral-cluster-hypershift-aws.yaml
+            params:
+              - name: eaasSpaceSecretRef
+                value: $(tasks.provision-eaas-space.results.secretRef)
+              - name: version
+                value: "$(steps.pick-version.results.version)"
+    - name: deploy-and-test
+      runAfter:
+        - provision-cluster
+      taskSpec:
+        volumes:
+          - name: credentials
+            emptyDir: {}
+        params:
+          - name: deployment-file
+            type: string
+            description: Path to the deployment YAML file
+          - name: image
+            type: string
+            description: Image for the deployment container
+          - name: git-url
+            type: string
+            description: git repo
+          - name: git-branch
+            type: string
+            description: git branch
+        steps:
+          - name: get-kubeconfig
+            ref:
+              resolver: git
+              params:
+                - name: url
+                  value: https://github.com/konflux-ci/build-definitions.git
+                - name: revision
+                  value: main
+                - name: pathInRepo
+                  value: stepactions/eaas-get-ephemeral-cluster-credentials/0.1/eaas-get-ephemeral-cluster-credentials.yaml
+            params:
+              - name: eaasSpaceSecretRef
+                value: $(tasks.provision-eaas-space.results.secretRef)
+              - name: clusterName
+                value: "$(tasks.provision-cluster.results.clusterName)"
+              - name: credentials
+                value: credentials
+          - name: apply-deployment
+            image: docker.io/bitnami/kubectl:latest
+            volumeMounts:
+              - name: credentials
+                mountPath: /credentials
+            workingDir: /workspace
+            env:
+              - name: JOB_SPEC
+                value: $(tasks.test-metadata.results.job-spec)
+              - name: KUBECONFIG
+                value: "/credentials/$(steps.get-kubeconfig.results.kubeconfig)"
+            script: |
+              #!/bin/sh
+              set -eux
+              
+              git clone "$(tasks.test-metadata.results.git-url)" -b "$(tasks.test-metadata.results.source-repo-branch)"
+              cd todo-list-app
+              # Replace the placeholder in the deployment file with the provided image
+              sed -i "s|\${IMAGE}|$(params.image)|g" $(params.deployment-file)
+
+              kubectl get pods
+
+              # Apply the deployment manifest
+              kubectl apply -f $(params.deployment-file)
+      params:
+        - name: deployment-file
+          value: "$(params.deployment-file)"
+        - name: image
+          value: "$(tasks.sealights-get-refs.results.container-image)"
         - name: git-url
-          value: $(tasks.test-metadata.results.source-repo-url)
+          value: "$(tasks.test-metadata.results.git-url)"
         - name: git-branch
-          value: $(tasks.test-metadata.results.source-repo-branch)
-        - name: git-revision
-          value: $(tasks.test-metadata.results.git-revision)
-        - name: konflux-component
-          value: $(tasks.test-metadata.results.component-name)
-        - name: IMAGE
-          value: $(tasks.test-metadata.results.container-image)
+          value: "$(tasks.test-metadata.results.source-repo-branch)"

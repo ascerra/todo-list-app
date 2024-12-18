@@ -1,0 +1,73 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: todo-app
+  labels:
+    app: todo-app
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: todo-app
+  template:
+    metadata:
+      labels:
+        app: todo-app
+    spec:
+      securityContext:
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+      volumes:
+        - name: shared-bin
+          emptyDir: {} # Shared volume for the installed `sl-python` binary
+      initContainers:
+        - name: install-sl-python
+          image: python:3.9-slim
+          command:
+            - "sh"
+            - "-c"
+            - >
+              pip install sealights-python-agent &&
+              cp $(which sl-python) /shared-bin/sl-python
+          volumeMounts:
+            - name: shared-bin
+              mountPath: /shared-bin
+          securityContext:
+            runAsUser: 1000  # Init container user ID
+            runAsGroup: 1000 # Init container group ID
+          resources: # Resource requests and limits for init container
+            requests:
+              memory: "64Mi"
+              cpu: "250m"
+            limits:
+              memory: "128Mi"
+              cpu: "500m"
+      containers:
+        - name: app-container
+          image: "${IMAGE}" # Placeholder for the dynamic image
+          env:
+            - name: PYTHON_EXE
+              value: "/shared-bin/sl-python run --tokenfile /app/token.txt -- python"
+          command:
+            - sh
+            - "-c"
+            - "$PYTHON_EXE app.py"
+          volumeMounts:
+            - name: shared-bin
+              mountPath: /shared-bin
+          ports:
+            - containerPort: 5000
+              protocol: TCP
+          securityContext:
+            runAsUser: 1000  # App container user ID
+            runAsGroup: 1000 # App container group ID
+          resources: # Resource requests and limits for the app container
+            requests:
+              memory: "128Mi"
+              cpu: "500m"
+            limits:
+              memory: "256Mi"
+              cpu: "1"
+      # imagePullSecrets:
+      # - name: quay-registry-secret
