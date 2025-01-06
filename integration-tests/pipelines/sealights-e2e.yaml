@@ -4,7 +4,7 @@ metadata:
   name: sealights-instrumentation
 spec:
   description: |
-    An integration test that exercises Sealights capabilities with Python.
+    An integration test that exercises Sealights capabilities with Python...
   params:
     - description: Snapshot of the application
       name: SNAPSHOT
