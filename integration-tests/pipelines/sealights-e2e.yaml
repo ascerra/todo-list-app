@@ -30,9 +30,24 @@ spec:
           value: $(params.SNAPSHOT)
         - name: test-name
           value: $(context.pipelineRun.name)
-    - name: provision-eaas-space
+    - name: sealights-get-refs
       runAfter:
         - test-metadata
+      taskRef:
+        resolver: git
+        params:
+          - name: url
+            value: https://github.com/konflux-ci/tekton-integration-catalog.git
+          - name: revision
+            value: main
+          - name: pathInRepo
+            value: tasks/sealights/sealights-get-refs/0.1/sealights-get-refs.yaml
+      params:
+        - name: SNAPSHOT
+          value: $(params.SNAPSHOT)
+    - name: provision-eaas-space
+      runAfter:
+        - sealights-get-refs
       taskRef:
         resolver: git
         params:
@@ -108,6 +123,9 @@ spec:
         volumes:
           - name: credentials
             emptyDir: {}
+          - name: sealights-credentials
+            secret:
+              secretName: sealights-credentials
         results:
           - name: BASE_URL
             description: The base URL of the deployed service
@@ -147,27 +165,44 @@ spec:
             volumeMounts:
               - name: credentials
                 mountPath: /credentials
+              - name: sealights-credentials
+                mountPath: /usr/local/sealights-credentials
             workingDir: /workspace
             env:
               - name: JOB_SPEC
                 value: $(tasks.test-metadata.results.job-spec)
               - name: KUBECONFIG
                 value: "/credentials/$(steps.get-kubeconfig.results.kubeconfig)"
+              - name: BUILD_SESSION_ID
+                value: $(tasks.sealights-get-refs.results.sealights-bsid)
+              - name: SL_TOKEN
+                valueFrom:
+                  secretKeyRef:
+                    name: sealights-credentials
+                    key: token
             script: |
               #!/bin/sh
               set -eux
               
               export IMAGE="$(tasks.test-metadata.results.container-image)"
+              export BUILD_SESSION_ID=$BUILD_SESSION_ID
 
-              if [ "$(tasks.test-metadata.results.source-repo-branch)" = "refs/heads/main" ]; then
-                git clone "$(tasks.test-metadata.results.git-url)"
-              else
-                git clone "$(tasks.test-metadata.results.git-url)" -b "$(tasks.test-metadata.results.source-repo-branch)"
+              BRANCH_NAME="$(tasks.test-metadata.results.target-repo-branch)"
+              if [[ "$(tasks.test-metadata.results.test-event-type)" == "pull_request" ]]; then
+                BRANCH_NAME="$(tasks.test-metadata.results.source-repo-branch)"
               fi
-              cd todo-list-app
+              git clone "$(tasks.test-metadata.results.git-url)" -b $BRANCH_NAME
+              
+              cd "$(tasks.test-metadata.results.git-repo)"
+
+              # Create the sealights-credentials secret
+              kubectl create secret generic sealights-credentials \
+              --from-literal=token=$SL_TOKEN \
+              --dry-run=client -o yaml | kubectl apply -f -
 
               # Replace placeholders in the deployment manifest with actual values
               sed -i "s|\${IMAGE}|$IMAGE|g" $(params.deployment-file)
+              sed -i "s|\${BUILD_SESSION_ID}|$BUILD_SESSION_ID|g" $(params.deployment-file)
 
               # Apply & expose the deployment
               kubectl apply -f $(params.deployment-file)
@@ -213,6 +248,9 @@ spec:
         volumes:
           - name: credentials
             emptyDir: {}
+          - name: sealights-credentials
+            secret:
+              secretName: sealights-credentials
         steps:
           - name: get-kubeconfig
             ref:
@@ -232,12 +270,23 @@ spec:
               - name: credentials
                 value: credentials
           - name: run-robot-tests
-            image: python:3.9-slim
+            image: quay.io/ascerra/python:3.9-slim
             volumeMounts:
               - name: credentials
                 mountPath: /credentials
+              - name: sealights-credentials
+                mountPath: /usr/local/sealights-credentials
             workingDir: /workspace
             env:
+              - name: SL_TOKEN
+                valueFrom:
+                  secretKeyRef:
+                    name: sealights-credentials
+                    key: token
+              - name: BUILD_SESSION_ID
+                value: $(tasks.sealights-get-refs.results.sealights-bsid)
+              - name: PYTHONPATH
+                value: "/app/sealights-integration-examples/robot-custom-integration/sl_python_robot"
               - name: BASE_URL
                 value: "$(tasks.deploy.results.BASE_URL)"
             script: |
@@ -251,7 +300,12 @@ spec:
 
               # Clone test repo
               apt-get update && apt-get install -y git && rm -rf /var/lib/apt/lists/
-              git clone "$(tasks.test-metadata.results.git-url)" -b "$(tasks.test-metadata.results.source-repo-branch)"
+              BRANCH_NAME="$(tasks.test-metadata.results.target-repo-branch)"
+              if [[ "$(tasks.test-metadata.results.test-event-type)" == "pull_request" ]]; then
+                BRANCH_NAME="$(tasks.test-metadata.results.source-repo-branch)"
+              fi
+              git clone "$(tasks.test-metadata.results.git-url)" -b $BRANCH_NAME
+              
               cd "$(tasks.test-metadata.results.git-repo)"
               
               # Install test dependencies
@@ -259,5 +313,9 @@ spec:
               pip install --no-cache-dir -r robot_requirements.txt              
               pip install opentelemetry-exporter-otlp-proto-grpc
 
+              # Install repo holding sl-python listener script (SLListener.py).
+              git clone https://github.com/Sealights/sealights-integration-examples.git
+              pip install sealights-integration-examples/robot-custom-integration/.
+
               # Run robot tests
-              robot -v BASE_URL:"$BASE_URL" tests/integration_tests.robot
+              robot --listener sealights-integration-examples/robot-custom-integration/sl_python_robot/SLListener.py:"$SL_TOKEN":"$BUILD_SESSION_ID":Robot_Tests -v BASE_URL:"$BASE_URL" tests/integration_tests.robot

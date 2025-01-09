@@ -14,12 +14,68 @@ spec:
       labels:
         app: todo-app
     spec:
+      securityContext:
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+      volumes:
+        - name: shared-bin
+          emptyDir: {}
+        - name: sealights-credentials
+          secret:
+            secretName: sealights-credentials
+      initContainers:
+        - name: install-sl-python
+          image: quay.io/ascerra/python:3.9-slim
+          command:
+            - "sh"
+            - "-c"
+            - >
+              pip install sealights-python-agent --target /shared-bin  &&
+              cp /shared-bin/bin/sl-python /shared-bin/sl-python &&
+              chmod +x /shared-bin/sl-python
+          volumeMounts:
+            - name: shared-bin
+              mountPath: /shared-bin
+          securityContext:
+            runAsUser: 1000
+            runAsGroup: 1000
+          resources:
+            requests:
+              memory: "64Mi"
+              cpu: "250m"
+            limits:
+              memory: "128Mi"
+              cpu: "500m"
       containers:
         - name: app-container
           image: "${IMAGE}" # Placeholder replaced dynamically
+          env:
+            - name: SL_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: sealights-credentials
+                  key: token
+            - name: PYTHON_EXE
+              value: "/shared-bin/sl-python run --tokenfile /sealights/token --buildsessionid ${BUILD_SESSION_ID} -- python"
+          command:
+            - sh
+            - "-c"
+            - >
+              export PYTHONPATH=/shared-bin &&
+              $PYTHON_EXE app.py
+          volumeMounts:
+            - name: shared-bin
+              mountPath: /shared-bin
+            - name: sealights-credentials
+              mountPath: /sealights
+              readOnly: true
           ports:
             - containerPort: 5000
               protocol: TCP
+          securityContext:
+            runAsUser: 1000
+            runAsGroup: 1000
           resources:
             requests:
               memory: "128Mi"
@@ -27,6 +83,3 @@ spec:
             limits:
               memory: "256Mi"
               cpu: "1"
-          securityContext:
-            runAsUser: 1000
-            runAsGroup: 1000
