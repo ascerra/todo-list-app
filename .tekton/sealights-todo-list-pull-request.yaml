@@ -165,6 +165,39 @@ spec:
       workspaces:
       - name: basic-auth
         workspace: git-auth
+    - name: sealights-instrumentation
+      runAfter:
+        - clone-repository
+      taskRef:
+        resolver: git
+        params:
+          - name: url
+            value: https://github.com/ascerra/tekton-integration-catalog.git
+          - name: revision
+            value: python-sealights-task
+          - name: pathInRepo
+            value: tasks/sealights/sealights-python/0.1/sealights-python.yaml
+      params:
+        - name: source-artifact
+          value: $(tasks.clone-repository.results.SOURCE_ARTIFACT)
+        - name: python-version
+          value: "311"
+        - name: component
+          value: '{{ repo_name }}'
+        - name: branch
+          value: '{{ source_branch }}'
+        - name: revision
+          value: '{{ revision }}'
+        - name: repository-url
+          value: '{{ repo_url }}'
+        - name: pull-request-number
+          value: '{{ pull_request_number }}'
+        - name: exclude
+          value: ['/app/source/tests/*']
+        - name: scm-provider
+          value: "Github"
+        - name: workspace-path
+          value: "/app"
     - name: prefetch-dependencies
       params:
       - name: input
@@ -176,7 +209,7 @@ spec:
       - name: ociArtifactExpiresAfter
         value: $(params.image-expires-after)
       runAfter:
-      - clone-repository
+      - sealights-instrumentation
       taskRef:
         params:
         - name: name
