@@ -2,7 +2,6 @@
 FROM python:3.9-slim
 
 
-# pass in the salt and secret as build args and only use them in the mel build but don't expose them in the final release image
 ARG ARG_TEST_SECRET
 ENV TEST_SECRET=${ARG_TEST_SECRET}
 
