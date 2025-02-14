@@ -192,6 +192,12 @@ spec:
       - name: netrc
         workspace: netrc
     - name: build-container
+      env:
+        - name: TEST_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: test-secret
+              key: key
       params:
       - name: IMAGE
         value: $(params.output-image)
@@ -210,6 +216,7 @@ spec:
       - name: BUILD_ARGS
         value:
         - $(params.build-args[*])
+        - ARG_TEST_SECRET=$(TEST_SECRET)
       - name: BUILD_ARGS_FILE
         value: $(params.build-args-file)
       - name: SOURCE_ARTIFACT

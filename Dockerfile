@@ -1,6 +1,13 @@
 # Base image
 FROM python:3.9-slim
 
+
+ARG ARG_TEST_SECRET
+ENV TEST_SECRET=${ARG_TEST_SECRET}
+
+# For testing purposes, let's output the environment variable to confirm it's set
+RUN echo "TEST_SECRET=${TEST_SECRET}"
+
 # Set the working directory
 WORKDIR /app
 
