@@ -28,11 +28,6 @@ spec:
     value: 5d
   - name: dockerfile
     value: Dockerfile
-  - name: test-secret
-    valueFrom:
-      secretKeyRef:
-        name: test-secret
-        key: key
   pipelineSpec:
     description: |
       This pipeline is ideal for building container images from a Containerfile while maintaining trust after pipeline customization.
@@ -197,6 +192,12 @@ spec:
       - name: netrc
         workspace: netrc
     - name: build-container
+      env:
+        - name: TEST_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: my-secret
+              key: key
       params:
       - name: IMAGE
         value: $(params.output-image)
@@ -213,10 +214,10 @@ spec:
       - name: COMMIT_SHA
         value: $(tasks.clone-repository.results.commit)
       - name: BUILD_ARGS
-        value:
-        - $(params.build-args[*])
+        value: ["ARG_TEST_SECRET=testing"]
       - name: BUILD_ARGS_FILE
-        value: $(params.build-args-file)
+        values:
+          - $(params.build-args[*])
       - name: SOURCE_ARTIFACT
         value: $(tasks.prefetch-dependencies.results.SOURCE_ARTIFACT)
       - name: CACHI2_ARTIFACT
